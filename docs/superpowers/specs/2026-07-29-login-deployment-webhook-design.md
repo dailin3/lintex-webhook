@@ -1,133 +1,153 @@
-# Lintex Login Deployment Webhook Design
+# Lintex Login Deployment Webhook
 
-## Purpose
+## Goal
 
-Build a small Rust HTTP service that deploys only `lintex-login` after GitHub
-Actions has pushed a new image to Aliyun ACR. The service runs directly on the
-Docker host and invokes one administrator-controlled deployment script.
+Build a small Rust webhook that deploys only `lintex-login` after GitHub Actions
+pushes a new Docker image to Aliyun ACR.
 
-The first release intentionally does not support multiple projects, arbitrary
-commands, a database, a job queue, deployment history, or automatic rollback.
+## Flow
 
-## Deployment Flow
+```mermaid
+flowchart LR
+    A[Push to master] --> B[GitHub Actions]
+    B --> C[Build Docker image]
+    C --> D[Push image to Aliyun ACR]
+    D --> E[POST /deploy]
+    E --> F{Bearer token valid?}
+    F -- No --> G[401 Unauthorized]
+    F -- Yes --> H{Deployment running?}
+    H -- Yes --> I[409 Conflict]
+    H -- No --> J[202 Accepted]
+    J --> K[Run fixed deploy script]
+    K --> L[docker compose pull]
+    L --> M[docker compose up -d]
+    M --> N[Health check]
+    N --> O[Write result to logs]
+```
 
-1. A push to `master` starts the `lintex-login` GitHub Actions workflow.
-2. GitHub Actions builds the image and pushes `latest` and commit-SHA tags to
-   Aliyun ACR.
-3. After the push succeeds, GitHub Actions sends `POST /deploy` with a bearer
-   token to the webhook.
-4. The webhook authenticates the request and rejects it if another deployment
-   is running.
-5. The webhook starts the fixed deployment script asynchronously and returns
-   `202 Accepted` with a request ID.
-6. The script runs `docker compose pull`, then
-   `docker compose up -d --remove-orphans`, followed by an HTTP health check.
+The webhook returns immediately after starting the deployment. Deployment
+progress is written to the service logs.
 
-## HTTP Interface
+## API
 
 ### `GET /health`
 
-Returns `200 OK` when the webhook process is running. This endpoint does not
-require authentication and does not inspect the deployed application.
+Checks whether the webhook process is running. Authentication is not required.
+
+Response:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+```
+
+```json
+{
+  "status": "ok"
+}
+```
 
 ### `POST /deploy`
 
-Requires `Authorization: Bearer <WEBHOOK_TOKEN>`.
+Starts a `lintex-login` deployment.
 
-- `202 Accepted`: deployment started.
-- `401 Unauthorized`: token is absent or invalid.
-- `409 Conflict`: a deployment is already running.
-- `500 Internal Server Error`: the deployment process could not be started.
+Request:
 
-The request body is ignored. Callers cannot supply a command, project name,
-image, Compose path, or script path.
+```http
+POST /deploy HTTP/1.1
+Authorization: Bearer <WEBHOOK_TOKEN>
+```
 
-## Runtime Configuration
+The endpoint accepts no request body and no deployment parameters.
 
-The service reads these environment variables:
+Accepted response:
 
-- `WEBHOOK_TOKEN`: required secret used to authenticate deployment requests.
-- `DEPLOY_SCRIPT`: required absolute path to the administrator-controlled
-  deployment script.
-- `LISTEN_ADDR`: optional socket address; defaults to `127.0.0.1:9000`.
-- `RUST_LOG`: optional log filter; defaults to `lintex_webhook=info,tower_http=info`.
+```http
+HTTP/1.1 202 Accepted
+Content-Type: application/json
+```
 
-Secrets are never committed. An example environment file contains names and
-safe placeholders only.
+```json
+{
+  "status": "accepted",
+  "request_id": "019faa3c-92c8-7610-ba6f-0d538fbdfe2c"
+}
+```
+
+Error responses:
+
+| Status | Meaning |
+| --- | --- |
+| `401 Unauthorized` | Bearer token is missing or invalid |
+| `409 Conflict` | A deployment is already running |
+| `500 Internal Server Error` | The deployment script could not be started |
+
+Errors use the same JSON shape:
+
+```json
+{
+  "status": "error",
+  "message": "deployment already running"
+}
+```
+
+## Deployment Script
+
+The webhook runs one fixed script configured by the server administrator. The
+request cannot select a command, image, project, or file path.
+
+The script performs:
+
+```bash
+docker compose pull
+docker compose up -d --remove-orphans
+curl --fail --retry 10 --retry-delay 2 http://127.0.0.1:3000/auth/login
+```
+
+The real script will set its Compose directory explicitly and stop when any
+command fails.
+
+## Configuration
+
+| Variable | Required | Description |
+| --- | --- | --- |
+| `WEBHOOK_TOKEN` | Yes | Long random token shared with GitHub Actions |
+| `DEPLOY_SCRIPT` | Yes | Absolute path to the fixed deployment script |
+| `LISTEN_ADDR` | No | Listen address, default `127.0.0.1:9000` |
+| `RUST_LOG` | No | Log filter, default `lintex_webhook=info` |
+
+The token is stored in a systemd environment file and in GitHub Actions
+Secrets. It is never committed to Git.
 
 ## Logging
 
-The service writes structured logs to standard output so systemd/journald can
-collect them. Each deployment receives a request ID. Logs include:
+Logs go to standard output and are collected by journald. Each deployment has a
+request ID. The service logs:
 
+- request accepted or rejected;
 - request ID and remote address;
-- authentication success or rejection without the token value;
-- deployment accepted or rejected because one is already running;
-- script start, completion status, and elapsed time;
-- captured script stdout and stderr, line by line, with the request ID;
-- process-launch and unexpected runtime errors.
+- deployment start and finish time;
+- script stdout and stderr;
+- exit status and elapsed time.
 
-The fixed deployment script prints a short message before each stage: registry
-pull, Compose update, and application health check. It must not print registry
-credentials or environment-file contents.
+The bearer token and other credentials must never appear in logs.
 
-The service keeps only the current deployment lock in memory. Persistent log
-storage, rotation, and retention are delegated to journald.
+View logs on the server with:
 
-## Concurrency And Failure Handling
+```bash
+journalctl -u lintex-webhook -f
+```
 
-An atomic in-memory lock allows one deployment at a time. The lock is released
-after success, script failure, or process-launch failure. A failed deployment is
-logged but does not terminate the webhook process.
+## Scope
 
-The deployment script stops at the first failed command. If `docker compose
-pull`, `docker compose up`, or the health check fails, the script exits nonzero
-and the webhook records the failure. Automatic rollback is outside the first
-release; the immutable commit-SHA image remains available for manual rollback.
+The first version uses Rust, Axum, and Tokio. It runs as a systemd service on
+the Docker host and permits only one deployment at a time.
 
-## Security
+It does not include multiple projects, a database, a queue, a web dashboard, or
+automatic rollback.
 
-- Listen on loopback by default and place HTTPS and any public exposure behind
-  the server's existing reverse proxy.
-- Authenticate with a long random token stored in GitHub Actions secrets and a
-  root-readable systemd environment file.
-- Compare bearer tokens without exposing them in logs.
-- Execute only the configured script, with no shell input from the request.
-- Run under a dedicated system user that has only the Docker access required
-  for deployment.
-- Apply request-body and timeout limits at the reverse proxy.
+## Verification
 
-## Repository Contents
-
-- Rust application using Axum and Tokio.
-- Unit and HTTP integration tests.
-- `deploy-login.sh.example` showing the fixed Compose deployment flow.
-- Example `docker-compose.yml` and environment file for `lintex-login`.
-- Example systemd service unit.
-- README with build, installation, GitHub Actions, logging, and rollback steps.
-- MIT license so the repository can be public.
-
-## Testing
-
-Tests cover:
-
-- health endpoint success;
-- missing, malformed, and incorrect bearer tokens;
-- a valid request starts the configured script;
-- concurrent deployment requests return `409 Conflict`;
-- deployment lock is released after script success or failure;
-- secrets do not appear in application-generated logs where practical to test.
-
-Before release, run formatting, Clippy with warnings denied, all tests, and a
-local smoke test with a harmless temporary deployment script.
-
-## Integration Changes
-
-After the webhook is deployed, `lintex-login` gains:
-
-- a production Compose example using the Aliyun ACR image;
-- a GitHub Actions step that calls the webhook only after image push succeeds;
-- documentation for `DEPLOY_WEBHOOK_URL` and `DEPLOY_WEBHOOK_TOKEN` secrets.
-
-These integration changes are separate from the webhook binary and do not put
-server credentials in either repository.
+Tests cover the health endpoint, token authentication, deployment triggering,
+concurrent request rejection, and releasing the deployment lock after success
+or failure. Before release, run `cargo fmt`, `cargo clippy`, and `cargo test`.
