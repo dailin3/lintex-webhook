@@ -1,0 +1,95 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  TARGET: x86_64-unknown-linux-musl
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Run Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        run: cargo test --all-features
+
+  build:
+    needs: check
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ env.TARGET }}
+
+      - name: Install musl tools
+        run: sudo apt-get update && sudo apt-get install --yes musl-tools
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ env.TARGET }}
+
+      - name: Build release binary
+        run: cargo build --release --locked --target "${TARGET}"
+
+      - name: Package binary
+        run: |
+          install -Dm755 \
+            "target/${TARGET}/release/lintex-webhook" \
+            dist/lintex-webhook
+          cp README.md LICENSE dist/
+          tar -C dist -czf lintex-webhook-linux-x86_64.tar.gz .
+          sha256sum lintex-webhook-linux-x86_64.tar.gz \
+            > lintex-webhook-linux-x86_64.tar.gz.sha256
+
+      - name: Upload Actions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lintex-webhook-linux-x86_64
+          path: |
+            lintex-webhook-linux-x86_64.tar.gz
+            lintex-webhook-linux-x86_64.tar.gz.sha256
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            lintex-webhook-linux-x86_64.tar.gz
+            lintex-webhook-linux-x86_64.tar.gz.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

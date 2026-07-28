@@ -23,6 +23,20 @@ cargo test
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
+## Download
+
+Every push to `master` produces a Linux x86_64 binary in GitHub Actions
+Artifacts. Version tags such as `v0.1.0` also publish the archive and SHA-256
+checksum on the [Releases page](https://github.com/dailin3/lintex-webhook/releases).
+
+The release binary is statically linked with musl, so Rust is not required on
+the server.
+
+```bash
+tar -xzf lintex-webhook-linux-x86_64.tar.gz
+sudo install -m 755 lintex-webhook /usr/local/bin/lintex-webhook
+```
+
 ## Server installation
 
 1. Create a `lintex-deploy` system user and add it to the Docker group.
