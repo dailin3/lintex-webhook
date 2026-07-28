@@ -9,6 +9,9 @@ pushed to Aliyun ACR.
 - `POST /deploy` requires `Authorization: Bearer <token>` and returns `202`.
 - A second deployment while one is running returns `409`.
 
+The `202` response means the deployment was accepted. Script failures happen
+asynchronously and are reported in the service logs.
+
 The webhook accepts no deployment arguments. It runs only the script configured
 with `DEPLOY_SCRIPT`.
 

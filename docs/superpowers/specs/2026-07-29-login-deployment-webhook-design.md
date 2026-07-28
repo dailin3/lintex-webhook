@@ -80,7 +80,6 @@ Error responses:
 | --- | --- |
 | `401 Unauthorized` | Bearer token is missing or invalid |
 | `409 Conflict` | A deployment is already running |
-| `500 Internal Server Error` | The deployment script could not be started |
 
 Errors use the same JSON shape:
 
@@ -125,10 +124,13 @@ Logs go to standard output and are collected by journald. Each deployment has a
 request ID. The service logs:
 
 - request accepted or rejected;
-- request ID and remote address;
+- request ID;
 - deployment start and finish time;
 - script stdout and stderr;
 - exit status and elapsed time.
+
+Because deployment is asynchronous, script launch and execution failures are
+reported in logs after the endpoint has returned `202`.
 
 The bearer token and other credentials must never appear in logs.
 
