@@ -16,8 +16,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=/opt/lintex-login
+ReadWritePaths=/opt/lintex-config /var/lib/lintex-webhook
 
 [Install]
 WantedBy=multi-user.target
-

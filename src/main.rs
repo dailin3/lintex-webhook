@@ -1,6 +1,4 @@
-use std::sync::Arc;
-
-use lintex_webhook::{AppConfig, AppState, ProcessScriptRunner, app};
+use lintex_webhook::{AppConfig, AppState, app};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -18,7 +16,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listener = tokio::net::TcpListener::bind(config.listen_addr).await?;
     let state = AppState::new(
         config.token,
-        Arc::new(ProcessScriptRunner::new(config.deploy_script)),
+        config.config_repository,
+        config.services_config,
+        config.runs_directory,
     );
 
     info!(address = %config.listen_addr, "lintex webhook listening");
