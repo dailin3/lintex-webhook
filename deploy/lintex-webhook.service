@@ -1,0 +1,23 @@
+[Unit]
+Description=Lintex Login deployment webhook
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=lintex-deploy
+Group=docker
+EnvironmentFile=/etc/lintex-webhook.env
+ExecStart=/usr/local/bin/lintex-webhook
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/lintex-login
+
+[Install]
+WantedBy=multi-user.target
+
