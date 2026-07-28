@@ -9,6 +9,8 @@ Type=simple
 User=lintex-deploy
 Group=docker
 EnvironmentFile=/etc/lintex-webhook.env
+Environment=HOME=/var/lib/lintex-deploy
+Environment=DOCKER_CONFIG=/var/lib/lintex-deploy/.docker
 ExecStart=/usr/local/bin/lintex-webhook
 Restart=on-failure
 RestartSec=5
