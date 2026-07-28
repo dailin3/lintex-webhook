@@ -1,0 +1,2 @@
+d /var/lib/lintex-webhook 0750 lintex-deploy docker -
+d /var/lib/lintex-webhook/runs 0750 lintex-deploy docker -
