@@ -39,6 +39,10 @@ sudo install -m 755 lintex-webhook /usr/local/bin/lintex-webhook
 
 ## Server installation
 
+For the complete current deployment procedure, including Docker, systemd,
+Nginx, HTTPS, and GitHub Actions secrets, follow
+[`docs/deploy-v0.1.0.md`](docs/deploy-v0.1.0.md).
+
 1. Create a `lintex-deploy` system user and add it to the Docker group.
 2. Install `target/release/lintex-webhook` at `/usr/local/bin/lintex-webhook`.
 3. Copy `deploy/deploy-login.sh.example` to `/opt/lintex-login/deploy.sh`, make
