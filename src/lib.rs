@@ -43,6 +43,8 @@ pub struct AppState {
     runs_directory: PathBuf,
     deploying: Arc<AtomicBool>,
     update_repository: bool,
+    update_command: PathBuf,
+    update_with_sudo: bool,
 }
 
 impl AppState {
@@ -59,6 +61,8 @@ impl AppState {
             runs_directory,
             deploying: Arc::new(AtomicBool::new(false)),
             update_repository: true,
+            update_command: PathBuf::from("/usr/local/libexec/lintex-webhook-start-update"),
+            update_with_sudo: true,
         }
     }
 
@@ -75,7 +79,20 @@ impl AppState {
             runs_directory,
             deploying: Arc::new(AtomicBool::new(false)),
             update_repository: false,
+            update_command: PathBuf::from("/bin/true"),
+            update_with_sudo: false,
         }
+    }
+
+    pub fn new_for_test_with_updater(
+        token: impl AsRef<[u8]>,
+        config_repository: PathBuf,
+        runs_directory: PathBuf,
+        update_command: PathBuf,
+    ) -> Self {
+        let mut state = Self::new_for_test(token, config_repository, runs_directory);
+        state.update_command = update_command;
+        state
     }
 }
 
@@ -160,12 +177,38 @@ pub fn app(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/deploy/{service}", post(deploy))
+        .route("/update", post(update))
         .route("/runs", get(list_runs))
         .route("/runs/{id}", get(get_run))
         .route("/runs/{id}/log", get(get_log))
         .route("/runs/{id}/stream", get(stream_log))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
+}
+
+async fn update(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if !authorized(&headers, &state.token) {
+        return api_error(StatusCode::UNAUTHORIZED, "unauthorized");
+    }
+    let mut command = if state.update_with_sudo {
+        let mut command = Command::new("sudo");
+        command.arg("--non-interactive").arg(&state.update_command);
+        command
+    } else {
+        Command::new(&state.update_command)
+    };
+    match command.output().await {
+        Ok(output) if output.status.success() => (
+            StatusCode::ACCEPTED,
+            Json(serde_json::json!({"status":"accepted"})),
+        )
+            .into_response(),
+        Ok(output) => api_error_owned(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+        ),
+        Err(error) => api_error_owned(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+    }
 }
 
 async fn health() -> Json<serde_json::Value> {

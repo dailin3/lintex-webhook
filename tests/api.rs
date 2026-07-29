@@ -13,6 +13,7 @@ use tower::ServiceExt;
 struct Fixture {
     _temp: TempDir,
     state: AppState,
+    update_marker: std::path::PathBuf,
 }
 
 impl Fixture {
@@ -39,8 +40,22 @@ deploy_script = "{}"
             ),
         )
         .unwrap();
+        let update_marker = temp.path().join("update-started");
+        let update_script = temp.path().join("start-update.sh");
+        fs::write(
+            &update_script,
+            format!("#!/bin/sh\ntouch '{}'\n", update_marker.display()),
+        )
+        .unwrap();
+        fs::set_permissions(&update_script, fs::Permissions::from_mode(0o755)).unwrap();
         Self {
-            state: AppState::new_for_test("secret", config_dir, runs_dir),
+            state: AppState::new_for_test_with_updater(
+                "secret",
+                config_dir,
+                runs_dir,
+                update_script,
+            ),
+            update_marker,
             _temp: temp,
         }
     }
@@ -92,11 +107,54 @@ async fn health_is_public_but_run_routes_are_protected() {
     );
     assert_eq!(
         router
+            .clone()
             .oneshot(request("GET", "/runs", None))
             .await
             .unwrap()
             .status(),
         StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        router
+            .oneshot(request("POST", "/update", None))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+}
+
+#[tokio::test]
+async fn update_starts_the_configured_update_task() {
+    let fixture = Fixture::new("#!/bin/sh\nexit 0\n");
+    let marker = fixture.update_marker.clone();
+    let response = app(fixture.state)
+        .oneshot(request("POST", "/update", Some("secret")))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let body = json(response).await;
+    assert_eq!(body["status"], "accepted");
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while !marker.exists() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn update_route_does_not_accept_user_controlled_suffixes() {
+    let fixture = Fixture::new("#!/bin/sh\nexit 0\n");
+    assert_eq!(
+        app(fixture.state)
+            .oneshot(request("POST", "/update/v9.9.9", Some("secret")))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
     );
 }
 

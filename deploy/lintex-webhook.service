@@ -14,7 +14,6 @@ Environment=DOCKER_CONFIG=/var/lib/lintex-deploy/.docker
 ExecStart=/usr/local/bin/lintex-webhook
 Restart=on-failure
 RestartSec=5
-NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
