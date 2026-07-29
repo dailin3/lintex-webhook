@@ -60,6 +60,26 @@ The updater:
 4. restarts the service and checks `127.0.0.1:9000/health`;
 5. restores the previous binary and unit if the health check fails.
 
+### Slow GitHub Downloads
+
+If the server cannot download GitHub Release assets reliably, download and
+verify the release on a workstation, then copy it to the server:
+
+```bash
+mkdir lintex-webhook-release
+gh release download v0.2.4 \
+  --repo dailin3/lintex-webhook \
+  --dir lintex-webhook-release
+cd lintex-webhook-release
+sha256sum --check lintex-webhook-linux-x86_64.tar.gz.sha256
+tar -xzf lintex-webhook-linux-x86_64.tar.gz
+scp lintex-webhook aliyun:~/lintex-webhook-release
+```
+
+Install it with the same backup and health-check procedure used by the updater.
+The direct updater remains the preferred path because it also installs the
+matching systemd definitions and performs automatic rollback.
+
 ## Verify Production
 
 ```bash
