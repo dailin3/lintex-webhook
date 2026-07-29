@@ -111,6 +111,13 @@ a pinned release.
 
 ### Install The Private Config Repository
 
+`CONFIG_REPOSITORY` is the contract between the Webhook and the private Config
+repository. Its default and recommended value is `/opt/lintex-config`, as set
+in `/etc/lintex-webhook.env`. Keep the checkout there unless there is a clear
+server-level reason to move it. If it is moved, update `CONFIG_REPOSITORY` and
+restart `lintex-webhook.service`; changing only the clone location will break
+deployments.
+
 Add a read-only GitHub Deploy Key for `dailin3/lintex-config` to the new server,
 then either let the installer clone it:
 
@@ -138,7 +145,8 @@ deploy_script = "/opt/lintex-config/lintex-login/deploy.sh"
 ```
 
 Both paths must be absolute and remain inside `CONFIG_REPOSITORY`. Before each
-deployment, the Webhook runs `git pull --ff-only` in that repository.
+deployment, the Webhook runs `git pull --ff-only` in that repository. It only
+executes the selected service's `deploy.sh` after the Config pull succeeds.
 
 Real service `.env` files stay on the server and must not be committed. Create
 them from the corresponding `.env.example` files in `lintex-config` and set
