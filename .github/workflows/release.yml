@@ -36,7 +36,9 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Run tests
-        run: cargo test --all-features
+        run: |
+          cargo test --all-features
+          tests/install.sh
 
   build:
     needs: check
@@ -71,7 +73,7 @@ jobs:
             dist/lintex-webhook
           cp README.md LICENSE dist/
           cp deploy/lintex-webhook.service deploy/lintex-webhook.tmpfiles \
-            deploy/update-webhook.sh deploy/start-update.sh \
+            deploy/install.sh deploy/update-webhook.sh deploy/start-update.sh \
             deploy/lintex-webhook.sudoers dist/
           tar -C dist -czf lintex-webhook-bundle-linux-x86_64.tar.gz .
           sha256sum lintex-webhook-bundle-linux-x86_64.tar.gz \

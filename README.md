@@ -1,28 +1,108 @@
 # Lintex Webhook
 
-A small, allowlist-based Rust deployment webhook. It updates a private
-configuration repository, runs one configured deployment script, and stores
-CI-style terminal output for remote inspection.
+Lintex Webhook is a small, allowlist-based deployment service. It pulls the
+private `lintex-config` repository, runs one configured deployment script, and
+stores CI-style terminal output for remote inspection.
+
+```text
+service CI -> POST /deploy/:service -> lintex-webhook
+                                      -> git pull lintex-config
+                                      -> run the allowlisted deploy.sh
+                                      -> store logs and exit status
+
+webhook master -> GitHub Actions -> continuous release -> POST /update
+                                                    -> update the complete
+                                                       Webhook runtime bundle
+```
+
+The Webhook repository owns only its own binary, systemd unit, sudoers rule,
+tmpfiles rule, installer, and updater. Compose files, service deployment
+scripts, and service-specific configuration belong in the private
+`lintex-config` repository.
 
 ## API
 
-`GET /health` is public. Every other endpoint requires
-`Authorization: Bearer <token>`.
+`GET /health` is public. Every other endpoint requires:
 
-- `POST /deploy/:service` accepts a deployment and returns its `request_id`.
-- `GET /runs` lists recent runs.
-- `GET /runs/:id` returns metadata and exit status.
-- `GET /runs/:id/log` returns the complete terminal log.
-- `GET /runs/:id/stream` streams `log` and `done` SSE events.
+```http
+Authorization: Bearer <WEBHOOK_TOKEN>
+```
 
-Only one deployment runs at a time. Run data is retained for 30 days, up to
-500 runs. Tokens, environment contents, and registry credentials are never
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /deploy/:service` | Start an allowlisted service deployment |
+| `POST /update` | Start an asynchronous Webhook self-update |
+| `GET /runs` | List recent deployment runs |
+| `GET /runs/:id` | Read run metadata and exit status |
+| `GET /runs/:id/log` | Read the complete terminal log |
+| `GET /runs/:id/stream` | Stream `log` and `done` SSE events |
+
+Only one service deployment runs at a time. Run data is retained for 30 days,
+up to 500 runs. Tokens, environment contents, and registry credentials are not
 written to deployment logs.
 
-## Configuration
+## Install On A New Server
 
-Create `/etc/lintex-webhook.env` from `.env.example`. Services are allowlisted
-in `/opt/lintex-config/services.toml`:
+The server must be x86_64 Linux with systemd, Docker, Git, curl, OpenSSL,
+`sha256sum`, `tar`, and `visudo`. Install Docker before running the installer.
+
+Download the `continuous` release bundle on a trusted workstation, verify it,
+and copy it to the server:
+
+```bash
+mkdir -p lintex-webhook-install
+gh release download continuous \
+  --repo dailin3/lintex-webhook \
+  --dir lintex-webhook-install
+cd lintex-webhook-install
+sha256sum --check lintex-webhook-bundle-linux-x86_64.tar.gz.sha256
+tar -xzf lintex-webhook-bundle-linux-x86_64.tar.gz
+scp -r . your-server:~/lintex-webhook-install/
+```
+
+Run the idempotent installer on the server:
+
+```bash
+ssh your-server
+sudo ~/lintex-webhook-install/install.sh \
+  --bundle-directory ~/lintex-webhook-install
+```
+
+The installer:
+
+1. creates or updates the `lintex-deploy` system user;
+2. preserves an existing `/etc/lintex-webhook.env` and otherwise generates a
+   random 256-bit Webhook token;
+3. installs the binary, systemd unit, tmpfiles rule, sudoers rule, updater, and
+   update launcher;
+4. enables and starts `lintex-webhook.service`;
+5. verifies `http://127.0.0.1:9000/health`.
+
+It is safe to run the installer again. It does not overwrite an existing
+Webhook token, config checkout, deployment logs, or service secrets.
+
+The installer can also download a public release directly when the server has
+reliable GitHub access:
+
+```bash
+sudo ./install.sh --version continuous
+```
+
+Use `--version latest` for the newest formal release or `--version vX.Y.Z` for
+a pinned release.
+
+### Install The Private Config Repository
+
+Add a read-only GitHub Deploy Key for `dailin3/lintex-config` to the new server,
+then clone it as the deployment user:
+
+```bash
+sudo -u lintex-deploy git clone \
+  git@github.com:dailin3/lintex-config.git \
+  /opt/lintex-config
+```
+
+The expected service registry is `/opt/lintex-config/services.toml`:
 
 ```toml
 [services.lintex-login]
@@ -32,38 +112,143 @@ deploy_script = "/opt/lintex-config/lintex-login/deploy.sh"
 ```
 
 Both paths must be absolute and remain inside `CONFIG_REPOSITORY`. Before each
-deployment the webhook runs `git pull --ff-only` in that repository.
+deployment, the Webhook runs `git pull --ff-only` in that repository.
 
-## Build and release
+Real service `.env` files stay on the server and must not be committed. Create
+them from the corresponding `.env.example` files in `lintex-config` and set
+permissions appropriate for `lintex-deploy` and Docker.
+
+### Add HTTPS
+
+Reverse proxy `https://deploy.dailin.tech` to `127.0.0.1:9000`. Never expose
+port 9000 directly to the Internet. Configure TLS, then verify:
 
 ```bash
-cargo test --all-features
-cargo clippy --all-targets --all-features -- -D warnings
-cargo build --release
+curl --fail https://deploy.dailin.tech/health
 ```
 
-Pushes to `master` produce an Actions artifact. Only `v*` tags create a GitHub
-Release with a static Linux x86_64 binary and SHA-256 checksum.
+Configure the Webhook repository's GitHub Actions settings:
 
-## Server installation
+```text
+Repository variable:
+DEPLOY_WEBHOOK_URL=https://deploy.dailin.tech
 
-1. Create the `lintex-deploy` system user and add it to the Docker group.
-2. Clone the private config repository at `/opt/lintex-config` with a read-only
-   GitHub Deploy Key.
-3. Put real service secrets in ignored `.env` files beside each Compose file.
-4. Install the binary at `/usr/local/bin/lintex-webhook`.
-5. Install `deploy/lintex-webhook.service` and
-   `deploy/lintex-webhook.tmpfiles`, then enable the service.
-6. Reverse proxy `127.0.0.1:9000` through HTTPS; never expose it directly.
+Repository secret:
+DEPLOY_WEBHOOK_TOKEN=<WEBHOOK_TOKEN from /etc/lintex-webhook.env>
+```
 
-The complete first-install, release, production-update, rollback, and
-verification procedure is in [`docs/deployment.md`](docs/deployment.md).
+Do not print the token in terminal logs or put it in Git.
 
-Example log request:
+## Move To Another Server
+
+A server migration has four kinds of state. Move or recreate all four:
+
+| State | Location | Migration action |
+| --- | --- | --- |
+| Webhook runtime | `/usr/local`, systemd, sudoers | Recreate with `install.sh` |
+| Webhook identity | `/etc/lintex-webhook.env` | Securely copy it or generate a new token |
+| Deployment configuration | `/opt/lintex-config` | Clone again with a new read-only Deploy Key |
+| Service secrets/data | ignored `.env`, volumes, databases | Back up and restore per service |
+
+Recommended migration order:
+
+1. Install Docker and the Webhook on the new server.
+2. Clone `lintex-config` and restore every server-only service `.env`.
+3. Restore persistent Docker volumes and databases. The Webhook does not back
+   these up.
+4. Install Nginx or another reverse proxy and obtain TLS certificates.
+5. Deploy each service on the new server and verify it through the server IP or
+   a temporary hostname.
+6. Lower DNS TTL, move `deploy.dailin.tech`, `login.dailin.tech`, and other
+   service records to the new server, then verify HTTPS.
+7. If the Webhook token changed, update `DEPLOY_WEBHOOK_TOKEN` in every caller
+   and in the Webhook repository's self-update workflow.
+8. Keep the old server available until OAuth callbacks, service deployment,
+   logs, and persistent data have all been verified.
+
+To preserve deployment history, copy `/var/lib/lintex-webhook/runs`. It is
+optional; losing it does not prevent future deployments.
+
+For Login specifically, remember that Nginx must allow Supabase's session
+cookies in callback responses:
+
+```nginx
+proxy_buffer_size 16k;
+proxy_buffers 8 16k;
+proxy_busy_buffers_size 32k;
+```
+
+Without these buffers, a successful OAuth callback can appear as `502 Bad
+Gateway` with `upstream sent too big header` in the Nginx error log.
+
+## Daily Use
+
+### Deploy A Service
+
+Service repositories build their own images. Their CI calls the Webhook after
+publishing an image:
 
 ```bash
-curl -H "Authorization: Bearer $WEBHOOK_TOKEN" \
-  https://deploy.example.com/runs/$RUN_ID/log
+curl --fail --show-error --request POST \
+  --header "Authorization: Bearer $WEBHOOK_TOKEN" \
+  https://deploy.dailin.tech/deploy/lintex-login
+```
+
+The Webhook pulls `lintex-config`, resolves the allowlisted service, executes
+its `deploy.sh`, and returns a `request_id`.
+
+### Read Deployment Logs
+
+```bash
+curl --fail \
+  --header "Authorization: Bearer $WEBHOOK_TOKEN" \
+  https://deploy.dailin.tech/runs
+
+curl --fail \
+  --header "Authorization: Bearer $WEBHOOK_TOKEN" \
+  https://deploy.dailin.tech/runs/$RUN_ID/log
+```
+
+Webhook process and self-update logs remain in systemd:
+
+```bash
+sudo journalctl -u lintex-webhook --since "30 minutes ago"
+sudo journalctl -u lintex-webhook-update --since "30 minutes ago"
+```
+
+### Change Service Deployment Configuration
+
+Edit the private `lintex-config` repository. Commit Compose files, deployment
+scripts, and non-secret configuration there. The next `/deploy/:service` call
+pulls the change automatically. Keep real `.env` files server-only.
+
+### Update The Webhook
+
+An ordinary push to `master` runs tests, builds a static Linux binary,
+publishes the complete `continuous` bundle, and calls production `/update`.
+The server installs the entire bundle, including systemd, sudoers, tmpfiles,
+and operational scripts. It health-checks the new process and restores the
+previous runtime files if the check fails.
+
+Formal `vX.Y.Z` tags create historical GitHub Releases but are not required for
+normal deployment.
+
+Verify the automatic update with:
+
+```bash
+sudo systemctl status lintex-webhook --no-pager
+sudo journalctl -u lintex-webhook-update --since "15 minutes ago"
+curl --fail https://deploy.dailin.tech/health
+```
+
+## Local Development
+
+```bash
+cargo fmt --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test --all-features
+tests/install.sh
+cargo build --release
 ```
 
 ## License
