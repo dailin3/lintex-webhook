@@ -44,7 +44,20 @@ written to deployment logs.
 ## Install On A New Server
 
 The server must be x86_64 Linux with systemd, Docker, Git, curl, OpenSSL,
-`sha256sum`, `tar`, and `visudo`. Install Docker before running the installer.
+`sha256sum`, `tar`, `sudo`, and `visudo`. The installer checks these
+prerequisites, but it does not install them. Install Docker from Docker's
+official repository before running the installer; the Docker daemon must be
+running and a `docker` group must exist.
+
+For example, on Debian or Ubuntu, install the non-Docker tools with:
+
+```bash
+sudo apt update
+sudo apt install -y git curl openssl coreutils tar sudo
+```
+
+Nginx (or another reverse proxy), DNS, and TLS certificates are also separate
+server prerequisites. The installer does not configure public networking.
 
 Download the `continuous` release bundle on a trusted workstation, verify it,
 and copy it to the server:
@@ -81,6 +94,11 @@ The installer:
 It is safe to run the installer again. It does not overwrite an existing
 Webhook token, config checkout, deployment logs, or service secrets.
 
+By default, this installs only the Webhook runtime. It creates
+`/opt/lintex-config` as an empty directory, but it does **not** clone the
+private `lintex-config` repository because GitHub authentication must be
+configured first.
+
 The installer can also download a public release directly when the server has
 reliable GitHub access:
 
@@ -94,7 +112,15 @@ a pinned release.
 ### Install The Private Config Repository
 
 Add a read-only GitHub Deploy Key for `dailin3/lintex-config` to the new server,
-then clone it as the deployment user:
+then either let the installer clone it:
+
+```bash
+sudo ./install.sh \
+  --bundle-directory ~/lintex-webhook-install \
+  --config-repository-url git@github.com:dailin3/lintex-config.git
+```
+
+Or clone it manually as the deployment user after installing the Webhook:
 
 ```bash
 sudo -u lintex-deploy git clone \
