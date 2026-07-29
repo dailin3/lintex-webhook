@@ -1,9 +1,0 @@
-services:
-  login:
-    image: crpi-5k1h8laml9223z4c.cn-beijing.personal.cr.aliyuncs.com/lintex/login:latest
-    restart: unless-stopped
-    env_file:
-      - .env.production
-    ports:
-      - "127.0.0.1:3000:3000"
-
