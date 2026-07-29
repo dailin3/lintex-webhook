@@ -56,6 +56,9 @@ Release with a static Linux x86_64 binary and SHA-256 checksum.
    `deploy/lintex-webhook.tmpfiles`, then enable the service.
 6. Reverse proxy `127.0.0.1:9000` through HTTPS; never expose it directly.
 
+The complete first-install, release, production-update, rollback, and
+verification procedure is in [`docs/deployment.md`](docs/deployment.md).
+
 Example log request:
 
 ```bash
