@@ -104,7 +104,8 @@ else
 fi
 
 for file in lintex-webhook lintex-webhook.service lintex-webhook.sudoers \
-  lintex-webhook.tmpfiles start-update.sh update-webhook.sh; do
+  lintex-webhook.tmpfiles install.sh uninstall.sh start-update.sh \
+  update-webhook.sh; do
   [[ -f "$source_directory/$file" ]] || {
     echo "ERROR: bundle is missing $file" >&2
     exit 1
@@ -142,6 +143,7 @@ EOF
 fi
 
 install -o root -g root -m 755 "$source_directory/lintex-webhook" /usr/local/bin/lintex-webhook
+install -o root -g root -m 755 "$source_directory/uninstall.sh" /usr/local/sbin/lintex-webhook-uninstall
 install -o root -g root -m 644 "$source_directory/lintex-webhook.service" /etc/systemd/system/lintex-webhook.service
 install -o root -g root -m 644 "$source_directory/lintex-webhook.tmpfiles" /usr/lib/tmpfiles.d/lintex-webhook.conf
 install -o root -g root -m 755 "$source_directory/update-webhook.sh" /usr/local/libexec/lintex-webhook-update

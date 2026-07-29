@@ -241,6 +241,56 @@ sudo journalctl -u lintex-webhook-update --since "15 minutes ago"
 curl --fail https://deploy.dailin.tech/health
 ```
 
+The `/update` endpoint is only for changes to the `lintex-webhook` repository.
+Do not call it after changing Login or another business service.
+
+### Choose The Correct Trigger
+
+There are two independent CI triggers:
+
+| Repository changed | CI action after a successful build | Server action |
+| --- | --- | --- |
+| `lintex-webhook` | `POST /update` | Replace and restart the complete Webhook runtime bundle |
+| A business service such as `lintex-login` | `POST /deploy/lintex-login` | Pull `lintex-config` and execute that service's `deploy.sh` |
+
+A typical service deployment script in private `lintex-config` runs:
+
+```bash
+docker compose pull
+docker compose up -d --remove-orphans
+```
+
+The service CI must call `/deploy/:service` only after its new image has been
+successfully pushed. The Webhook itself does not build images and does not need
+to understand the service repository.
+
+## Uninstall
+
+The installer places the uninstaller on the server. Run:
+
+```bash
+sudo lintex-webhook-uninstall
+```
+
+The default uninstall removes only the Webhook runtime:
+
+- binary and self-update scripts;
+- systemd unit;
+- sudoers and tmpfiles rules.
+
+It preserves `/etc/lintex-webhook.env`, `/var/lib/lintex-webhook`, the complete
+`/opt/lintex-config` checkout, service `.env` files, Docker containers, images,
+volumes, and databases. This makes reinstalling or moving the Webhook safer.
+
+To also remove the Webhook token, run history, and `lintex-deploy` system user:
+
+```bash
+sudo lintex-webhook-uninstall --purge
+```
+
+Even `--purge` never deletes `lintex-config` or Docker service data. Those
+belong to the deployed services and require separate, explicit removal.
+
 ## Local Development
 
 ```bash
