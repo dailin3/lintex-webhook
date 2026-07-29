@@ -67,6 +67,7 @@ systemctl daemon-reload
 
 if systemctl restart lintex-webhook \
   && curl --fail --silent --show-error --retry 10 --retry-delay 1 \
+    --retry-connrefused \
     http://127.0.0.1:9000/health >/dev/null; then
   echo "Lintex Webhook ${version} is healthy"
   exit 0

@@ -25,8 +25,8 @@ git checkout master
 git pull --ff-only
 cargo test --all-features
 cargo clippy --all-targets --all-features -- -D warnings
-git tag -a v0.2.3 -m "Lintex Webhook v0.2.3"
-git push origin v0.2.3
+git tag -a v0.2.4 -m "Lintex Webhook v0.2.4"
+git push origin v0.2.4
 ```
 
 Wait for the `Build and Release` workflow to finish before updating the server.
@@ -39,17 +39,17 @@ installed, and run it as root:
 ```bash
 ssh aliyun
 curl --fail --show-error --location \
-  https://raw.githubusercontent.com/dailin3/lintex-webhook/v0.2.3/deploy/update-webhook.sh \
-  --output /tmp/update-webhook.sh
-sudo bash /tmp/update-webhook.sh v0.2.3
-rm /tmp/update-webhook.sh
+  https://raw.githubusercontent.com/dailin3/lintex-webhook/v0.2.4/deploy/update-webhook.sh \
+  --output ~/update-webhook.sh
+sudo bash ~/update-webhook.sh v0.2.4
+rm ~/update-webhook.sh
 ```
 
-For future releases, replace `v0.2.3` in both places with the new tag. Once
+For future releases, replace `v0.2.4` in both places with the new tag. Once
 this updater is present in a release, `latest` may be used as its argument:
 
 ```bash
-sudo bash /tmp/update-webhook.sh latest
+sudo bash ~/update-webhook.sh latest
 ```
 
 The updater:
